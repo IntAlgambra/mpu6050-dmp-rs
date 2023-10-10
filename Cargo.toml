@@ -4,6 +4,7 @@ version = "0.3.0"
 authors = [
     "Bob McWhirter <bmcwhirt@redhat.com>",
     "Rafael Bachmann <rafael.bachmann.93@gmail.com",
+    "Int Algambra <bass.valle@gmail.com>"
 ]
 edition = "2021"
 license = "Apache-2.0"
@@ -14,5 +15,5 @@ repository = "https://github.com/barafael/mpu6050-dmp-rs"
 readme = "README.md"
 
 [dependencies]
-embedded-hal = { version = "0.2.7", features = ["unproven"] }
-libm = "0.2.1"
+embedded-hal = { version = "1.0.0-rc.1"}
+libm = "0.2.8"

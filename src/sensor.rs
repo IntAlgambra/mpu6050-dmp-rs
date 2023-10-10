@@ -11,28 +11,26 @@ use crate::fifo::Fifo;
 use crate::gyro::{Gyro, GyroFullScale};
 use crate::registers::Register;
 use core::fmt::Debug;
-use embedded_hal::blocking::delay;
-use embedded_hal::blocking::i2c::{Write, WriteRead};
+use embedded_hal::delay;
+use embedded_hal::i2c::I2c;
 
 /// InvenSense MPU-6050 Driver
-pub struct Mpu6050<I2c>
+pub struct Mpu6050<I>
 where
-    I2c: Write + WriteRead,
-    <I2c as WriteRead>::Error: Debug,
-    <I2c as Write>::Error: Debug,
+    I: I2c,
+    <I>::Error: Debug,
 {
-    i2c: I2c,
+    i2c: I,
     address: u8,
 }
 
-impl<I2c> Mpu6050<I2c>
+impl<I> Mpu6050<I>
 where
-    I2c: Write + WriteRead,
-    <I2c as WriteRead>::Error: Debug,
-    <I2c as Write>::Error: Debug,
+    I: I2c,
+    <I>::Error: Debug,
 {
     /// Construct a new i2c driver for the MPU-6050
-    pub fn new(i2c: I2c, address: Address) -> Result<Self, InitError<I2c>> {
+    pub fn new(i2c: I, address: Address) -> Result<Self, InitError<I>> {
         let mut sensor = Self {
             i2c,
             address: address.into(),
@@ -49,15 +47,15 @@ where
     }
 
     /// Returns the underlying I2C peripheral, consuming this driver.
-    pub fn release(self) -> I2c {
+    pub fn release(self) -> I {
         self.i2c
     }
 
     /// Load DMP firmware and perform all appropriate initialization.
     pub fn initialize_dmp(
         &mut self,
-        delay: &mut impl delay::DelayMs<u32>,
-    ) -> Result<(), Error<I2c>> {
+        delay: &mut impl delay::DelayUs,
+    ) -> Result<(), Error<I>> {
         self.reset(delay)?;
         self.disable_sleep()?;
         self.reset_signal_path(delay)?;
@@ -78,19 +76,19 @@ where
         Ok(())
     }
 
-    pub(crate) fn read(&mut self, bytes: &[u8], response: &mut [u8]) -> Result<(), Error<I2c>> {
+    pub(crate) fn read(&mut self, bytes: &[u8], response: &mut [u8]) -> Result<(), Error<I>> {
         self.i2c
             .write_read(self.address, bytes, response)
             .map_err(|e| Error::WriteReadError(e))
     }
 
-    pub(crate) fn write(&mut self, bytes: &[u8]) -> Result<(), Error<I2c>> {
+    pub(crate) fn write(&mut self, bytes: &[u8]) -> Result<(), Error<I>> {
         self.i2c
             .write(self.address, bytes)
             .map_err(|e| Error::WriteError(e))
     }
 
-    pub(crate) fn read_register(&mut self, reg: Register) -> Result<u8, Error<I2c>> {
+    pub(crate) fn read_register(&mut self, reg: Register) -> Result<u8, Error<I>> {
         let mut buf = [0; 1];
         self.read(&[reg as u8], &mut buf)?;
         Ok(buf[0])
@@ -100,17 +98,17 @@ where
         &mut self,
         reg: Register,
         buf: &'a mut [u8],
-    ) -> Result<&'a [u8], Error<I2c>> {
+    ) -> Result<&'a [u8], Error<I>> {
         self.read(&[reg as u8], buf)?;
         Ok(buf)
     }
 
-    pub(crate) fn write_register(&mut self, reg: Register, value: u8) -> Result<(), Error<I2c>> {
+    pub(crate) fn write_register(&mut self, reg: Register, value: u8) -> Result<(), Error<I>> {
         self.write(&[reg as u8, value])
     }
 
     /// Perform power reset of the MPU
-    pub fn reset(&mut self, clock: &mut impl delay::DelayMs<u32>) -> Result<(), Error<I2c>> {
+    pub fn reset(&mut self, clock: &mut impl delay::DelayUs) -> Result<(), Error<I>> {
         let mut value = self.read_register(Register::PwrMgmt1)?;
         value |= 1 << 7;
         self.write_register(Register::PwrMgmt1, value)?;
@@ -121,8 +119,8 @@ where
     /// Perform reset of the signal path
     pub fn reset_signal_path(
         &mut self,
-        clock: &mut impl delay::DelayMs<u32>,
-    ) -> Result<(), Error<I2c>> {
+        clock: &mut impl delay::DelayUs,
+    ) -> Result<(), Error<I>> {
         let mut value = self.read_register(Register::UserCtrl)?;
         value |= 1 << 0;
         self.write_register(Register::UserCtrl, value)?;
@@ -131,14 +129,14 @@ where
     }
 
     /// Pick the clock-source
-    pub fn set_clock_source(&mut self, clock_source: ClockSource) -> Result<(), Error<I2c>> {
+    pub fn set_clock_source(&mut self, clock_source: ClockSource) -> Result<(), Error<I>> {
         let mut value = self.read_register(Register::PwrMgmt1)?;
         value |= clock_source as u8;
         self.write_register(Register::PwrMgmt1, value)?;
         Ok(())
     }
 
-    pub fn disable_interrupts(&mut self) -> Result<(), Error<I2c>> {
+    pub fn disable_interrupts(&mut self) -> Result<(), Error<I>> {
         self.write_register(Register::IntEnable, 0x00)
     }
 
@@ -151,8 +149,8 @@ where
     pub fn calibrate_accel(
         &mut self,
         loops: u8,
-        delay: &mut impl delay::DelayMs<u32>,
-    ) -> Result<(), Error<I2c>> {
+        delay: &mut impl delay::DelayUs,
+    ) -> Result<(), Error<I>> {
         self.set_accel_calibration(&Accel::new(0, 0, 0))?;
 
         delay.delay_ms(10);
@@ -180,8 +178,8 @@ where
     pub fn calibrate_gyro(
         &mut self,
         loops: u8,
-        delay: &mut impl delay::DelayMs<u32>,
-    ) -> Result<(), Error<I2c>> {
+        delay: &mut impl delay::DelayUs,
+    ) -> Result<(), Error<I>> {
         self.set_gyro_calibration(&Gyro::new(0, 0, 0))?;
 
         delay.delay_ms(10);
@@ -208,19 +206,19 @@ where
     /// If calibration parameters are not "reasonable" this function might never return.
     pub fn calibrate(
         &mut self,
-        delay: &mut impl delay::DelayMs<u32>,
+        delay: &mut impl delay::DelayUs,
         parameters: &CalibrationParameters,
-    ) -> Result<(Accel, Gyro), Error<I2c>> {
+    ) -> Result<(Accel, Gyro), Error<I>> {
         calibrate(self, delay, parameters)
     }
 
     /// A building block for performing calibration: collect several samples return their average
     pub fn collect_mean_values(
         &mut self,
-        delay: &mut impl delay::DelayMs<u32>,
+        delay: &mut impl delay::DelayUs,
         accel_scale: AccelFullScale,
         gravity: ReferenceGravity,
-    ) -> Result<(Accel, Gyro), Error<I2c>> {
+    ) -> Result<(Accel, Gyro), Error<I>> {
         collect_mean_values(self, delay, accel_scale, gravity)
     }
 
@@ -275,26 +273,26 @@ where
     /// of the application that will use this device with exactly these settings.
     pub fn calibration_loop(
         &mut self,
-        delay: &mut impl delay::DelayMs<u32>,
+        delay: &mut impl delay::DelayUs,
         parameters: &CalibrationParameters,
         actions: CalibrationActions,
-    ) -> Result<(CalibrationActions, Accel, Gyro), Error<I2c>> {
+    ) -> Result<(CalibrationActions, Accel, Gyro), Error<I>> {
         calibration_loop(self, delay, parameters, actions)
     }
 
-    pub fn get_accel_calibration(&mut self) -> Result<Accel, Error<I2c>> {
+    pub fn get_accel_calibration(&mut self) -> Result<Accel, Error<I>> {
         let mut data = [0; 6];
         self.read_registers(Register::AccelOffsetX_H, &mut data)?;
         Ok(Accel::from_bytes(data))
     }
 
-    pub fn get_gyro_calibration(&mut self) -> Result<Gyro, Error<I2c>> {
+    pub fn get_gyro_calibration(&mut self) -> Result<Gyro, Error<I>> {
         let mut data = [0; 6];
         self.read_registers(Register::GyroOffsetX_H, &mut data)?;
         Ok(Gyro::from_bytes(data))
     }
 
-    pub fn set_accel_calibration(&mut self, values: &Accel) -> Result<(), Error<I2c>> {
+    pub fn set_accel_calibration(&mut self, values: &Accel) -> Result<(), Error<I>> {
         let data = values.to_bytes();
         let bytes = [
             Register::AccelOffsetX_H as u8,
@@ -308,7 +306,7 @@ where
         self.write(&bytes)
     }
 
-    pub fn set_gyro_calibration(&mut self, values: &Gyro) -> Result<(), Error<I2c>> {
+    pub fn set_gyro_calibration(&mut self, values: &Gyro) -> Result<(), Error<I>> {
         let data = values.to_bytes();
         let bytes = [
             Register::GyroOffsetX_H as u8,
@@ -322,38 +320,38 @@ where
         self.write(&bytes)
     }
 
-    pub fn set_accel_full_scale(&mut self, scale: AccelFullScale) -> Result<(), Error<I2c>> {
+    pub fn set_accel_full_scale(&mut self, scale: AccelFullScale) -> Result<(), Error<I>> {
         let mut value = self.read_register(Register::AccelConfig)?;
         value |= (scale as u8) << 3;
         self.write_register(Register::AccelConfig, value)
     }
 
-    pub fn set_gyro_full_scale(&mut self, scale: GyroFullScale) -> Result<(), Error<I2c>> {
+    pub fn set_gyro_full_scale(&mut self, scale: GyroFullScale) -> Result<(), Error<I>> {
         let mut value = self.read_register(Register::GyroConfig)?;
         value |= (scale as u8) << 3;
         self.write_register(Register::GyroConfig, value)
     }
 
-    pub fn set_sample_rate_divider(&mut self, div: u8) -> Result<(), Error<I2c>> {
+    pub fn set_sample_rate_divider(&mut self, div: u8) -> Result<(), Error<I>> {
         self.write_register(Register::SmpRtDiv, div)
     }
 
     pub fn set_digital_lowpass_filter(
         &mut self,
         filter: DigitalLowPassFilter,
-    ) -> Result<(), Error<I2c>> {
+    ) -> Result<(), Error<I>> {
         let mut value = self.read_register(Register::Config)?;
         value |= filter as u8;
         self.write_register(Register::Config, value)
     }
 
-    pub fn reset_fifo(&mut self) -> Result<(), Error<I2c>> {
+    pub fn reset_fifo(&mut self) -> Result<(), Error<I>> {
         let mut value = self.read_register(Register::UserCtrl)?;
         value |= 1 << 2;
         self.write_register(Register::UserCtrl, value)
     }
 
-    pub fn enable_fifo(&mut self) -> Result<(), Error<I2c>> {
+    pub fn enable_fifo(&mut self) -> Result<(), Error<I>> {
         let mut value = self.read_register(Register::UserCtrl)?;
         value |= 1 << 6;
         self.write_register(Register::UserCtrl, value)
@@ -361,28 +359,28 @@ where
 
     /// Set the DMP bit.
     /// To perform full DMP initialization, see `initialize_dmp()`
-    pub fn enable_dmp(&mut self) -> Result<(), Error<I2c>> {
+    pub fn enable_dmp(&mut self) -> Result<(), Error<I>> {
         let mut value = self.read_register(Register::UserCtrl)?;
         value |= 1 << 7;
         self.write_register(Register::UserCtrl, value)
     }
 
     // Unset the DMP bit.
-    pub fn disable_dmp(&mut self) -> Result<(), Error<I2c>> {
+    pub fn disable_dmp(&mut self) -> Result<(), Error<I>> {
         let mut value = self.read_register(Register::UserCtrl)?;
         value &= !(1 << 7);
         self.write_register(Register::UserCtrl, value)
     }
 
     /// Reset the DMP processor
-    pub fn reset_dmp(&mut self) -> Result<(), Error<I2c>> {
+    pub fn reset_dmp(&mut self) -> Result<(), Error<I>> {
         let mut value = self.read_register(Register::UserCtrl)?;
         value |= 1 << 3;
         self.write_register(Register::UserCtrl, value)
     }
 
     /// Read the FIFO
-    pub fn read_fifo<'a>(&mut self, buf: &'a mut [u8]) -> Result<&'a [u8], Error<I2c>> {
+    pub fn read_fifo<'a>(&mut self, buf: &'a mut [u8]) -> Result<&'a [u8], Error<I>> {
         let mut len = self.get_fifo_count()?;
 
         if buf.len() < len {
@@ -396,34 +394,34 @@ where
         }
     }
 
-    pub fn get_fifo_enabled(&mut self) -> Result<Fifo, Error<I2c>> {
+    pub fn get_fifo_enabled(&mut self) -> Result<Fifo, Error<I>> {
         let value = self.read_register(Register::FifoEn)?;
         Ok(Fifo::from_byte(value))
     }
 
-    pub fn set_fifo_enabled(&mut self, fifo: Fifo) -> Result<(), Error<I2c>> {
+    pub fn set_fifo_enabled(&mut self, fifo: Fifo) -> Result<(), Error<I>> {
         self.write_register(Register::FifoEn, fifo.to_byte())
     }
 
-    pub fn get_fifo_count(&mut self) -> Result<usize, Error<I2c>> {
+    pub fn get_fifo_count(&mut self) -> Result<usize, Error<I>> {
         let mut buf = [0; 2];
         let _value = self.read_registers(Register::FifoCount_H, &mut buf)?;
         Ok(u16::from_be_bytes(buf) as usize)
     }
 
-    pub fn disable_sleep(&mut self) -> Result<(), Error<I2c>> {
+    pub fn disable_sleep(&mut self) -> Result<(), Error<I>> {
         let mut value = self.read_register(Register::PwrMgmt1)?;
         value &= !(1 << 6);
         self.write_register(Register::PwrMgmt1, value)
     }
 
-    pub fn accel(&mut self) -> Result<Accel, Error<I2c>> {
+    pub fn accel(&mut self) -> Result<Accel, Error<I>> {
         let mut data = [0; 6];
         self.read_registers(Register::AccelX_H, &mut data)?;
         Ok(Accel::from_bytes(data))
     }
 
-    pub fn gyro(&mut self) -> Result<Gyro, Error<I2c>> {
+    pub fn gyro(&mut self) -> Result<Gyro, Error<I>> {
         let mut data = [0; 6];
         self.read_registers(Register::GyroX_H, &mut data)?;
         Ok(Gyro::from_bytes(data))
